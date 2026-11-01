@@ -114,7 +114,7 @@ PluginComponent {
                         backgroundColor: Theme.secondaryContainer
                         textColor: Theme.onSecondaryContainer
                         onClicked: {
-                            Qt.openUrlExternally(root.info.pageUrl || "https://apod.nasa.gov/apod/astropix.html");
+                            Qt.openUrlExternally(root.info.pageUrl || "https://science.nasa.gov/apod/");
                             pop.closePopout();
                         }
                     }

@@ -11,7 +11,8 @@ and keeps it updated daily. Works on niri, Hyprland and anything else DMS runs o
   then applied through the shell's wallpaper manager, so matugen theming follows it.
 - Once today's picture is applied it won't override a wallpaper you pick by hand until tomorrow.
 - On video days it keeps your current wallpaper, or (optionally) uses a still image NASA publishes for the video. Images with "logo" in the URL are never used.
-- If the NASA API is down or rate-limited it falls back to reading the APOD web page.
+- It checks both the NASA API and the newest article on science.nasa.gov/apod/ and uses whichever is newer,
+  so a lagging or broken API never leaves you on an old picture.
 - Optional bar/dock widget: left click shows title, image and explanation; right click refreshes.
 
 ## Install

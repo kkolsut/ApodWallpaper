@@ -58,34 +58,15 @@ PluginComponent {
         }
     }
 
-    // ---- Step 1: ask the APOD API what today's picture is ----
-    function check(force) {
-        if (busy)
-            return "busy";
-        busy = true;
-        publish("");
-
-        const api = "https://api.nasa.gov/planetary/apod?thumbs=true&api_key=" + encodeURIComponent(apiKey);
-        Proc.runCommand(pid + ".api", ["curl", "-fsSL", "--max-time", "30", api], (out, code) => {
-            let info = null;
-            if (code === 0) {
-                try {
-                    info = parseApi(JSON.parse(out));
-                } catch (e) {
-                    console.warn("[apodWallpaper] bad API response:", e);
-                }
-            }
-            if (info)
-                handleInfo(info, force);
-            else
-                scrapeFallback(force);   // API down or rate-limited: read the APOD web page instead
-        }, 0, 45000, root);
-        return "checking";
-    }
-
     readonly property var imageExt: /\.(jpe?g|png|gif|webp)(?:[?#]|$)/i
     readonly property var videoExt: /\.(mp4|webm|mov|m4v|ogv)(?:[?#]|$)/i
     readonly property var badImage: /logo|meatball|favicon|placeholder|default_?image/i
+    readonly property string listingUrl: "https://science.nasa.gov/apod/"
+    readonly property var months: ["january", "february", "march", "april", "may", "june", "july", "august", "september", "october", "november", "december"]
+
+    function log(msg) {
+        console.info("[apodWallpaper]", msg);
+    }
 
     function isGoodImage(url) {
         return !!url && imageExt.test(url) && !badImage.test(url);
@@ -96,6 +77,101 @@ PluginComponent {
         for (let i = 0; i < str.length; i++)
             h = ((h << 5) + h + str.charCodeAt(i)) >>> 0;
         return h.toString(16);
+    }
+
+    // Reads <meta property|name="key" content="..."> in either attribute order.
+    function meta(html, key) {
+        const k = key.replace(/[.:]/g, "\\$&");
+        const m = new RegExp('<meta[^>]+(?:property|name)\\s*=\\s*["\']' + k + '["\'][^>]*content\\s*=\\s*["\']([^"\']+)', "i").exec(html)
+            || new RegExp('<meta[^>]+content\\s*=\\s*["\']([^"\']+)["\'][^>]*(?:property|name)\\s*=\\s*["\']' + k + '["\']', "i").exec(html);
+        return m ? m[1].replace(/&amp;/g, "&").replace(/&#0?39;/g, "'").replace(/&quot;/g, '"') : "";
+    }
+
+    // science.nasa.gov serves resized renditions; strip the suffix to get the full-size original.
+    function originalOf(url) {
+        return (url || "").replace(/\/jcr:content\/renditions\/.*$/, "");
+    }
+
+    // "apod-2026-november-1-..." or "apod-29-october-2026-..." -> "2026-11-01"
+    function dateFromSlug(url) {
+        const pad = n => (n < 10 ? "0" : "") + n;
+        let m = /apod-(\d{4})-([a-z]+)-(\d{1,2})(?:-|\/|$)/i.exec(url);
+        let y, mon, d;
+        if (m) {
+            y = m[1]; mon = m[2]; d = m[3];
+        } else {
+            m = /apod-(\d{1,2})-([a-z]+)-(\d{4})(?:-|\/|$)/i.exec(url);
+            if (!m)
+                return "";
+            d = m[1]; mon = m[2]; y = m[3];
+        }
+        const mi = months.indexOf(mon.toLowerCase());
+        return mi < 0 ? "" : y + "-" + pad(mi + 1) + "-" + pad(Number(d));
+    }
+
+    // ---- Step 1: find the newest APOD from both the API and NASA's APOD page ----
+    function check(force) {
+        if (busy)
+            return "busy";
+        busy = true;
+        publish("");
+
+        const api = "https://api.nasa.gov/planetary/apod?thumbs=true&api_key=" + encodeURIComponent(apiKey);
+        Proc.runCommand(pid + ".api", ["curl", "-fsSL", "--max-time", "30", api], (out, code) => {
+            let apiInfo = null;
+            if (code === 0) {
+                try {
+                    apiInfo = parseApi(JSON.parse(out));
+                } catch (e) {
+                    console.warn("[apodWallpaper] bad API response:", e);
+                }
+            }
+            log(apiInfo ? "API says " + apiInfo.date : "API failed (exit " + code + "): " + (out || "").slice(0, 120));
+            findLatestArticle((articleUrl, articleDate) => decide(apiInfo, articleUrl, articleDate, force));
+        }, 0, 45000, root);
+        return "checking";
+    }
+
+    // The NASA API sometimes lags behind by days, so the newest dated article on
+    // science.nasa.gov/apod/ is the reference for "today".
+    function findLatestArticle(done) {
+        Proc.runCommand(pid + ".list", ["curl", "-fsSL", "--max-time", "30", listingUrl], (html, code) => {
+            if (code !== 0) {
+                log("APOD page unreachable (exit " + code + ")");
+                return done("", "");
+            }
+            const re = /href\s*=\s*"((?:https:\/\/science\.nasa\.gov)?\/image-article\/(?:apod\/)?apod-[^"#?]+)"/gi;
+            let best = "", bestDate = "", m;
+            while ((m = re.exec(html)) !== null) {
+                const url = m[1].startsWith("/") ? "https://science.nasa.gov" + m[1] : m[1];
+                const date = dateFromSlug(url);
+                if (date && date > bestDate) {
+                    best = url;
+                    bestDate = date;
+                }
+            }
+            log("APOD page says " + (bestDate || "nothing") + (best ? " " + best : ""));
+            done(best, bestDate);
+        }, 0, 45000, root);
+    }
+
+    function decide(apiInfo, articleUrl, articleDate, force) {
+        if (articleUrl && (!apiInfo || articleDate > apiInfo.date))
+            return readArticle(articleUrl, articleDate, force);              // API missing or stale
+        if (apiInfo && apiInfo.needsStill && articleUrl && articleDate === apiInfo.date)
+            return readArticle(articleUrl, articleDate, force);              // video: the article has the still
+        if (apiInfo && last.date && apiInfo.date < last.date) {
+            log("API is behind (" + apiInfo.date + "), keeping " + last.date);
+            return handleInfo({ skip: "NASA hasn't published anything newer than " + last.date + " yet" }, force);
+        }
+        if (apiInfo) {
+            if (articleUrl && articleDate === apiInfo.date)
+                apiInfo.pageUrl = articleUrl;
+            if (apiInfo.needsStill)
+                apiInfo.skip = "Today's APOD is a video with no still image, keeping the current wallpaper";
+            return handleInfo(apiInfo, force);
+        }
+        finish("Couldn't reach NASA APOD (API and web page both failed)", force);
     }
 
     function parseApi(j) {
@@ -118,60 +194,67 @@ PluginComponent {
         // YouTube/Vimeo give a real frame; anything else from the API may be a placeholder.
         if (/^https:\/\/(img\.youtube\.com|i\.ytimg\.com|i\.vimeocdn\.com)\//i.test(j.thumbnail_url || ""))
             return Object.assign(base, { url: j.thumbnail_url });
-        // Self-hosted video: look for NASA's own still image for it.
-        return Object.assign(base, { findStill: true, videoUrl: j.url || "" });
+        return Object.assign(base, { needsStill: true });
     }
 
-    function scrapeFallback(force) {
-        Proc.runCommand(pid + ".html", ["curl", "-fsSL", "--max-time", "30", "https://apod.nasa.gov/apod/astropix.html"], (html, code) => {
+    function readArticle(url, date, force) {
+        Proc.runCommand(pid + ".article", ["curl", "-fsSL", "--max-time", "30", url], (html, code) => {
             if (code !== 0)
-                return finish("Couldn't reach NASA APOD (curl exit " + code + ")", force);
+                return finish("Couldn't open " + url + " (curl exit " + code + ")", force);
 
-            const today = Qt.formatDate(new Date(), "yyyy-MM-dd");
-            // The day's picture is the link that wraps an <img>; other image/ links are not the APOD.
             const isVideo = /<(video|iframe)\b/i.test(html);
-            const img = isVideo ? null : /<a\s+href="(image\/[^"]+\.(?:jpe?g|png|gif|webp))"\s*>\s*<img\s/i.exec(html);
-            const title = /<center>\s*<b>\s*([^<]+?)\s*<\/b>/i.exec(html);
+            const preview = meta(html, "og:image") || meta(html, "twitter:image");
+            const title = (meta(html, "og:title") || "Astronomy Picture of the Day")
+                .replace(/\s*[-–]\s*NASA Science\s*$/i, "")
+                .replace(/^APOD:\s*(?:\d{4}\s+\w+\s+\d{1,2}|\d{1,2}\s+\w+\s+\d{4})\s*[-–]\s*/i, "");
             const info = {
-                date: today,
-                title: title ? title[1] : "Astronomy Picture of the Day",
-                explanation: "",
+                date: date,
+                title: title,
+                explanation: meta(html, "og:description") || meta(html, "description"),
                 copyright: "",
-                pageUrl: "https://apod.nasa.gov/apod/astropix.html"
+                pageUrl: url
             };
-            if (img)
-                info.url = "https://apod.nasa.gov/apod/" + img[1];
-            else if (useVideoThumbs)
-                return findStill(Object.assign(info, { videoUrl: "" }), force, html);
-            else
-                info.skip = "Today's APOD is a video, keeping the current wallpaper";
+            log("article " + date + ": video=" + isVideo + " image=" + (preview || "none"));
+
+            if (isVideo) {
+                if (!useVideoThumbs)
+                    info.skip = "Today's APOD is a video, keeping the current wallpaper";
+                else
+                    return findStill(info, force, html);
+            } else if (preferHd && isGoodImage(originalOf(preview))) {
+                info.url = originalOf(preview);
+            } else if (isGoodImage(preview)) {
+                info.url = preview;
+            } else {
+                info.skip = "Couldn't find today's picture on the APOD page";
+            }
             handleInfo(info, force);
         }, 0, 45000, root);
     }
 
     // ---- Video days: find a still image NASA published for the video ----
     function findStill(info, force, html) {
-        if (html === undefined) {
-            return Proc.runCommand(pid + ".still", ["curl", "-fsSL", "--max-time", "30", "https://apod.nasa.gov/apod/astropix.html"], (page, code) => findStill(info, force, code === 0 ? page : ""), 0, 45000, root);
-        }
-        const abs = u => /^https?:\/\//i.test(u) ? u : (u.startsWith("//") ? "https:" + u : "https://apod.nasa.gov/apod/" + u.replace(/^\/+/, ""));
+        const origin = (/^https?:\/\/[^\/]+/.exec(info.pageUrl || "") || ["https://science.nasa.gov"])[0];
+        const abs = u => /^https?:\/\//i.test(u) ? u : (u.startsWith("//") ? "https:" + u : origin + "/" + u.replace(/^\/+/, ""));
         const candidates = [];
         const poster = /<video\b[^>]*\bposter\s*=\s*"([^"]+)"/i.exec(html);
         if (poster)
             candidates.push(abs(poster[1]));
-        const og = /<meta[^>]+property\s*=\s*"og:image"[^>]+content\s*=\s*"([^"]+)"/i.exec(html);
-        if (og)
-            candidates.push(abs(og[1]));
-        const vids = [info.videoUrl];
-        const src = /<source\b[^>]*\bsrc\s*=\s*"([^"]+)"/i.exec(html) || /<video\b[^>]*\bsrc\s*=\s*"([^"]+)"/i.exec(html);
-        if (src)
-            vids.push(abs(src[1]));
-        for (const v of vids) {
-            if (v && videoExt.test(v))
-                for (const e of [".jpg", ".jpeg", ".png"])
-                    candidates.push(v.replace(videoExt, e));
+        for (const key of ["og:image", "twitter:image"]) {
+            const u = meta(html, key);
+            if (u) {
+                if (preferHd)
+                    candidates.push(abs(originalOf(u)));
+                candidates.push(abs(u));
+            }
         }
+        const src = /<source\b[^>]*\bsrc\s*=\s*"([^"]+)"/i.exec(html) || /<video\b[^>]*\bsrc\s*=\s*"([^"]+)"/i.exec(html);
+        if (src && videoExt.test(src[1]))
+            for (const e of [".jpg", ".jpeg", ".png"])
+                candidates.push(abs(src[1]).replace(videoExt, e));
+
         const good = candidates.filter((u, i) => isGoodImage(u) && candidates.indexOf(u) === i);
+        log("still candidates: " + (good.length ? good.join(" ") : "none"));
         if (!good.length)
             return handleInfo(Object.assign(info, { skip: "Today's APOD is a video with no still image, keeping the current wallpaper" }), force);
 
@@ -188,11 +271,8 @@ PluginComponent {
 
     // ---- Step 2: download (once per day) and apply ----
     function handleInfo(info, force) {
-        if (info.findStill) {
-            delete info.findStill;
-            return findStill(info, force);
-        }
         if (info.skip) {
+            log(info.skip);
             if (force)
                 ToastService.showInfo("APOD Wallpaper", info.skip);
             return finish("", force);
@@ -212,6 +292,7 @@ PluginComponent {
             if (code !== 0)
                 return finish("Download failed for " + info.url + " (exit " + code + ")", force);
 
+            log("applying " + file + " from " + info.url);
             applyWallpaper(file);
             last = Object.assign({}, info, { path: file });
             pluginService?.savePluginState(pid, "last", last);
@@ -256,7 +337,7 @@ PluginComponent {
         }
 
         function open(): string {
-            const url = root.last.pageUrl || "https://apod.nasa.gov/apod/astropix.html";
+            const url = root.last.pageUrl || root.listingUrl;
             Qt.openUrlExternally(url);
             return url;
         }
