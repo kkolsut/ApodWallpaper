@@ -3,7 +3,7 @@
   "name": "APOD Wallpaper",
   "description": "Sets NASA's Astronomy Picture of the Day as your wallpaper and refreshes it daily",
   "version": "1.0.4",
-  "author": "Your Name",
+  "author": "Krzysztof Kolsut",
   "icon": "public",
   "type": "composite",
   "capabilities": ["daemon", "dankbar-widget", "wallpaper-downloader", "wallpaper-set"],
