@@ -2,18 +2,24 @@
   "id": "apodWallpaper",
   "name": "APOD Wallpaper",
   "description": "Sets NASA's Astronomy Picture of the Day as your wallpaper and refreshes it daily",
-  "version": "1.0.4",
+  "version": "1.1.0",
   "author": "Krzysztof Kolsut",
   "icon": "public",
   "type": "composite",
-  "capabilities": ["daemon", "dankbar-widget", "wallpaper-downloader", "wallpaper-set"],
+  "capabilities": [
+    "daemon",
+    "dankbar-widget",
+    "wallpaper-downloader",
+    "wallpaper-set"
+  ],
   "components": {
     "daemon": "./ApodDaemon.qml",
     "widget": "./ApodWidget.qml"
   },
   "settings": "./ApodSettings.qml",
-  "startupCheck": "./StartupCheck.qml",
-  "dependencies": ["curl"],
-  "permissions": ["settings_read", "settings_write"],
+  "permissions": [
+    "settings_read",
+    "settings_write"
+  ],
   "requires_dms": ">=2.0.0"
 }

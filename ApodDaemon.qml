@@ -61,6 +61,8 @@ PluginComponent {
     readonly property var imageExt: /\.(jpe?g|png|gif|webp)(?:[?#]|$)/i
     readonly property var videoExt: /\.(mp4|webm|mov|m4v|ogv)(?:[?#]|$)/i
     readonly property var badImage: /logo|meatball|favicon|placeholder|default_?image/i
+    // DMS's built-in downloader: follows redirects, fails on HTTP errors, no curl needed.
+    readonly property var fetchCmd: [Proc.dmsBin, "dl", "--connect-timeout", "10", "--timeout", "30"]
     readonly property string listingUrl: "https://science.nasa.gov/apod/"
     readonly property var months: ["january", "february", "march", "april", "may", "june", "july", "august", "september", "october", "november", "december"]
 
@@ -117,7 +119,7 @@ PluginComponent {
         publish("");
 
         const api = "https://api.nasa.gov/planetary/apod?thumbs=true&api_key=" + encodeURIComponent(apiKey);
-        Proc.runCommand(pid + ".api", ["curl", "-fsSL", "--max-time", "30", api], (out, code) => {
+        Proc.runCommand(pid + ".api", fetchCmd.concat([api]), (out, code) => {
             let apiInfo = null;
             if (code === 0) {
                 try {
@@ -135,7 +137,7 @@ PluginComponent {
     // The NASA API sometimes lags behind by days, so the newest dated article on
     // science.nasa.gov/apod/ is the reference for "today".
     function findLatestArticle(done) {
-        Proc.runCommand(pid + ".list", ["curl", "-fsSL", "--max-time", "30", listingUrl], (html, code) => {
+        Proc.runCommand(pid + ".list", fetchCmd.concat([listingUrl]), (html, code) => {
             if (code !== 0) {
                 log("APOD page unreachable (exit " + code + ")");
                 return done("", "");
@@ -198,9 +200,9 @@ PluginComponent {
     }
 
     function readArticle(url, date, force) {
-        Proc.runCommand(pid + ".article", ["curl", "-fsSL", "--max-time", "30", url], (html, code) => {
+        Proc.runCommand(pid + ".article", fetchCmd.concat([url]), (html, code) => {
             if (code !== 0)
-                return finish("Couldn't open " + url + " (curl exit " + code + ")", force);
+                return finish("Couldn't open " + url + " (exit " + code + ")", force);
 
             const isVideo = /<(video|iframe)\b/i.test(html);
             const preview = meta(html, "og:image") || meta(html, "twitter:image");
@@ -221,10 +223,11 @@ PluginComponent {
                     info.skip = "Today's APOD is a video, keeping the current wallpaper";
                 else
                     return findStill(info, force, html);
-            } else if (preferHd && isGoodImage(originalOf(preview))) {
-                info.url = originalOf(preview);
             } else if (isGoodImage(preview)) {
-                info.url = preview;
+                const urls = [preview];
+                if (preferHd && isGoodImage(originalOf(preview)) && originalOf(preview) !== preview)
+                    urls.unshift(originalOf(preview));
+                info.urls = urls;
             } else {
                 info.skip = "Couldn't find today's picture on the APOD page";
             }
@@ -258,15 +261,8 @@ PluginComponent {
         if (!good.length)
             return handleInfo(Object.assign(info, { skip: "Today's APOD is a video with no still image, keeping the current wallpaper" }), force);
 
-        // Use the first candidate that actually exists.
-        const probe = 'for u in "$@"; do curl -fsL --max-time 15 -r 0-0 -o /dev/null "$u" && { echo "$u"; exit 0; }; done; exit 1';
-        Proc.runCommand(null, ["sh", "-c", probe, "probe"].concat(good), (out, code) => {
-            const url = out.trim();
-            if (code === 0 && url)
-                handleInfo(Object.assign(info, { url: url }), force);
-            else
-                handleInfo(Object.assign(info, { skip: "Today's APOD is a video with no still image, keeping the current wallpaper" }), force);
-        }, 0, 90000, root);
+        // The downloader uses the first candidate that actually exists.
+        handleInfo(Object.assign(info, { urls: good, noneMsg: "Today's APOD is a video with no still image, keeping the current wallpaper" }), force);
     }
 
     // ---- Step 2: download (once per day) and apply ----
@@ -278,28 +274,39 @@ PluginComponent {
             return finish("", force);
         }
 
-        const extMatch = imageExt.exec(info.url);
-        const ext = extMatch ? extMatch[1].toLowerCase() : "jpg";
-        // Name includes a hash of the source URL so a bad earlier download is never reused.
-        const file = saveDir + "/apod-" + info.date + "-" + hashOf(info.url) + "." + ext;
+        const urls = info.urls || [info.url];
+        delete info.urls;
 
         // Already applied today's picture: don't override a wallpaper the user picked by hand.
-        if (!force && last.date === info.date && last.path === file)
+        if (!force && last.date === info.date && urls.indexOf(last.url) >= 0)
             return finish("", force);
 
-        const script = 'mkdir -p "$1" && { [ -s "$2" ] || { curl -fsSL --max-time 180 -o "$2.part" "$3" && mv -f "$2.part" "$2"; }; }';
-        Proc.runCommand(null, ["sh", "-c", script, "apod", saveDir, file, info.url], (out, code) => {
-            if (code !== 0)
-                return finish("Download failed for " + info.url + " (exit " + code + ")", force);
-
-            log("applying " + file + " from " + info.url);
+        // One "url<TAB>file" pair per candidate. The file name includes a hash of the
+        // source URL so a bad earlier download is never reused.
+        const pairs = urls.map(u => {
+            const m = imageExt.exec(u);
+            return u + "\t" + saveDir + "/apod-" + info.date + "-" + hashOf(u) + "." + (m ? m[1].toLowerCase() : "jpg");
+        });
+        const script = 'for p in "$@"; do u="${p%%\t*}"; f="${p#*\t}"; '
+            + 'if [ -s "$f" ] || { "$0" dl --connect-timeout 10 --timeout 180 -o "$f.part" "$u" >/dev/null && mv -f "$f.part" "$f"; }; '
+            + 'then printf "%s" "$p"; exit 0; fi; rm -f "$f.part"; done; exit 1';
+        Proc.runCommand(null, ["sh", "-c", script, Proc.dmsBin].concat(pairs), (out, code) => {
+            const hit = (out || "").split("\t");
+            if (code !== 0 || hit.length < 2) {
+                if (info.noneMsg)
+                    return handleInfo({ skip: info.noneMsg }, force);
+                return finish("Download failed for " + urls[0] + " (exit " + code + ")", force);
+            }
+            const url = hit[0], file = hit[1];
+            delete info.noneMsg;
+            log("applying " + file + " from " + url);
             applyWallpaper(file);
-            last = Object.assign({}, info, { path: file });
+            last = Object.assign({}, info, { url: url, path: file });
             pluginService?.savePluginState(pid, "last", last);
             if (notify || force)
                 ToastService.showInfo("APOD Wallpaper", info.title);
             finish("", force);
-        }, 0, 200000, root);
+        }, 0, 400000, root);
     }
 
     function applyWallpaper(path) {

@@ -1,4 +1,5 @@
 import QtQuick
+import QtQuick.Window
 import Quickshell
 import qs.Common
 import qs.Services
@@ -40,7 +41,7 @@ PluginComponent {
             StyledText {
                 visible: root.showTitle && text !== ""
                 text: root.info.title || ""
-                width: Math.min(implicitWidth, 220)
+                width: Math.min(implicitWidth, Theme.sidebarWidth)
                 elide: Text.ElideRight
                 font.pixelSize: root.textSize
                 color: Theme.widgetTextColor
@@ -57,8 +58,8 @@ PluginComponent {
         }
     }
 
-    popoutWidth: 420
-    popoutHeight: 560
+    popoutWidth: Theme.dialogMaxWidth * 0.75
+    popoutHeight: Theme.dialogMaxWidth
 
     popoutContent: Component {
         PopoutComponent {
@@ -73,18 +74,19 @@ PluginComponent {
                 spacing: Theme.spacingM
 
                 Image {
+                    id: preview
                     width: parent.width
-                    height: 200
+                    height: visible ? Math.round(width * 9 / 16) : 0
                     visible: !!root.info.path
                     source: root.info.path ? "file://" + root.info.path : ""
                     fillMode: Image.PreserveAspectCrop
                     asynchronous: true
-                    sourceSize.width: 840
+                    sourceSize.width: Math.ceil(width * Screen.devicePixelRatio)
                 }
 
-                Flickable {
+                DFlickable {
                     width: parent.width
-                    height: root.popoutHeight - pop.headerHeight - pop.detailsHeight - 200 - Theme.buttonHeightXS - Theme.spacingXL * 3
+                    height: root.popoutHeight - pop.headerHeight - pop.detailsHeight - preview.height - Theme.buttonHeightXS - Theme.spacingXL * 3
                     contentHeight: explanation.implicitHeight
                     clip: true
 

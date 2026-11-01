@@ -2,7 +2,7 @@
 
 A Dux Shell (DankMaterialShell 2.x) plugin that sets NASA's
 [Astronomy Picture of the Day](https://apod.nasa.gov/apod/) as your wallpaper
-and keeps it updated daily. Works on niri, Hyprland and anything else DMS runs on.
+and keeps it updated daily. Works on any compositor Dux Shell supports (tested on niri).
 
 ## What it does
 
@@ -25,7 +25,7 @@ cp -r ApodWallpaper ~/.config/dms/plugins/
 Then Settings → Plugins → **Scan for Plugins** → enable **APOD Wallpaper**.
 Wallpaper management must be on (Settings → Wallpaper); external tools like swww/swaybg won't be touched.
 
-Requires `curl`.
+Requires Dux Shell 2.0 or newer. No extra packages: downloads use DMS's built-in `dms dl`.
 
 ### API key
 
