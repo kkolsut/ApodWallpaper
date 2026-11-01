@@ -51,7 +51,7 @@ PluginSettings {
     StringSetting {
         settingKey: "saveDir"
         label: "Download folder"
-        description: "Images are saved as apod-YYYY-MM-DD.jpg"
+        description: "Images are saved as apod-YYYY-MM-DD-<id>.jpg"
         placeholder: "~/Pictures/APOD"
         defaultValue: "~/Pictures/APOD"
     }

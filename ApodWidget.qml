@@ -41,7 +41,7 @@ PluginComponent {
             StyledText {
                 visible: root.showTitle && text !== ""
                 text: root.info.title || ""
-                width: Math.min(implicitWidth, Theme.sidebarWidth)
+                width: Math.min(implicitWidth, Theme.listItemHeight * 4)
                 elide: Text.ElideRight
                 font.pixelSize: root.textSize
                 color: Theme.widgetTextColor

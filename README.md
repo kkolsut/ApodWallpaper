@@ -7,7 +7,7 @@ and keeps it updated daily. Works on any compositor Dux Shell supports (tested o
 ## What it does
 
 - A background daemon checks APOD on login and every N hours (default 3).
-- A new picture is downloaded only when the date changes, to `~/Pictures/APOD/apod-YYYY-MM-DD.jpg`,
+- A new picture is downloaded only when the date changes, to `~/Pictures/APOD/apod-YYYY-MM-DD-<id>.jpg` (the id tells apart different source images for the same day),
   then applied through the shell's wallpaper manager, so matugen theming follows it.
 - Once today's picture is applied it won't override a wallpaper you pick by hand until tomorrow.
 - On video days it keeps your current wallpaper, or (optionally) uses a still image NASA publishes for the video. Images with "logo" in the URL are never used.
