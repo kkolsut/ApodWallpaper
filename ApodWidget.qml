@@ -73,15 +73,14 @@ PluginComponent {
                 width: parent.width
                 spacing: Theme.spacingM
 
-                Image {
+                CachingImage {
                     id: preview
                     width: parent.width
                     height: visible ? Math.round(width * 9 / 16) : 0
                     visible: !!root.info.path
-                    source: root.info.path ? "file://" + root.info.path : ""
+                    imagePath: root.info.path || ""
                     fillMode: Image.PreserveAspectCrop
-                    asynchronous: true
-                    sourceSize.width: Math.ceil(width * Screen.devicePixelRatio)
+                    maxCacheSize: Math.max(512, Math.ceil(width * Screen.devicePixelRatio))
                 }
 
                 DFlickable {
