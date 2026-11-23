@@ -310,10 +310,7 @@ PluginComponent {
     }
 
     function applyWallpaper(path) {
-        if (typeof SessionData.setWallpaper === "function")
-            SessionData.setWallpaper(path);
-        else
-            Quickshell.execDetached(["dms", "ipc", "call", "wallpaper", "set", path]);
+        SessionData.setWallpaper(path);
     }
 
     // ---- Scheduling ----

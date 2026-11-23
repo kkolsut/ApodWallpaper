@@ -22,7 +22,7 @@ PluginComponent {
     readonly property string icon: busy ? "sync" : "public"
 
     function refresh() {
-        Quickshell.execDetached(["dms", "ipc", "call", "apodWallpaper", "refresh"]);
+        Quickshell.execDetached([Proc.dmsBin, "ipc", "call", "apodWallpaper", "refresh"]);
     }
 
     pillRightClickAction: () => root.refresh()
